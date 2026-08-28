@@ -9,4 +9,10 @@ sealed interface AppDeepLink {
     data class AddonInstall(
         val manifestUrl: String
     ) : AppDeepLink
+
+    data class Magnet(
+        val infoHash: String,
+        val displayName: String?,
+        val trackers: List<String>
+    ) : AppDeepLink
 }
