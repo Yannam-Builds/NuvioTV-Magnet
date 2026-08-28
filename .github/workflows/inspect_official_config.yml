@@ -28,53 +28,60 @@ jobs:
           import zipfile
 
           with zipfile.ZipFile("official-nuvio.apk") as apk:
-              dex = b"".join(
-                  apk.read(name)
-                  for name in apk.namelist()
-                  if re.fullmatch(r"classes(?:\d+)?\.dex", name)
-              )
+              blobs = []
+              for name in apk.namelist():
+                  try:
+                      blobs.append(apk.read(name))
+                  except Exception:
+                      pass
+              blob = b"\n".join(blobs)
 
-          urls = sorted(set(
-              match.decode("ascii")
-              for match in re.findall(rb"https://[a-z0-9-]+\.supabase\.co", dex)
+          all_urls = sorted(set(
+              match.decode("ascii", errors="ignore").rstrip(".,;)")
+              for match in re.findall(rb"https://[^\\x00-\\x20\\x7f\"'<>]{4,300}", blob)
           ))
+          relevant_urls = [
+              url for url in all_urls
+              if any(marker in url.lower() for marker in ("supabase", "nuvio", "api.", "backend"))
+          ]
 
           jwt_candidates = sorted(set(
               match.decode("ascii")
-              for match in re.findall(rb"eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}", dex)
+              for match in re.findall(rb"eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}", blob)
           ))
-
           publishable_candidates = sorted(set(
               match.decode("ascii")
-              for match in re.findall(rb"sb_publishable_[A-Za-z0-9_-]{20,}", dex)
+              for match in re.findall(rb"sb_publishable_[A-Za-z0-9_-]{20,}", blob)
           ))
 
-          anon_jwts = []
+          decoded_jwts = []
           for token in jwt_candidates:
               try:
                   payload_part = token.split(".")[1]
                   payload_part += "=" * (-len(payload_part) % 4)
                   payload = json.loads(base64.urlsafe_b64decode(payload_part))
-                  if payload.get("role") == "anon":
-                      anon_jwts.append(token)
+                  decoded_jwts.append({"token": token, "payload": payload})
               except Exception:
                   pass
 
-          if not urls:
-              raise SystemExit("No Supabase URL found in official APK")
-          if not anon_jwts and not publishable_candidates:
-              raise SystemExit("No public Supabase client key found in official APK")
-
           result = {
-              "supabase_url": urls[0],
-              "supabase_anon_key": anon_jwts[0] if anon_jwts else publishable_candidates[0],
+              "relevant_urls": relevant_urls,
+              "supabase_urls": [u for u in relevant_urls if "supabase" in u.lower()],
+              "anon_jwts": [item["token"] for item in decoded_jwts if item["payload"].get("role") == "anon"],
+              "decoded_jwt_payloads": [item["payload"] for item in decoded_jwts],
+              "publishable_keys": publishable_candidates,
               "source_release": "https://github.com/NuvioMedia/NuvioTV/releases/tag/0.8.10-beta",
           }
           with open("official-public-config.json", "w", encoding="utf-8") as output:
               json.dump(result, output, indent=2)
               output.write("\n")
 
-          print("Extracted official public configuration without logging the key.")
+          print(
+              "Extracted public configuration candidates: "
+              f"{len(relevant_urls)} relevant URLs, "
+              f"{len(decoded_jwts)} JWTs, "
+              f"{len(publishable_candidates)} publishable keys."
+          )
 
       - name: Upload extracted configuration
         uses: actions/upload-artifact@v4
