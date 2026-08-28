@@ -31,17 +31,17 @@ jobs:
               dex = b"".join(
                   apk.read(name)
                   for name in apk.namelist()
-                  if re.fullmatch(r"classes(?:\\d+)?\\.dex", name)
+                  if re.fullmatch(r"classes(?:\d+)?\.dex", name)
               )
 
           urls = sorted(set(
               match.decode("ascii")
-              for match in re.findall(rb"https://[a-z0-9-]+\\.supabase\\.co", dex)
+              for match in re.findall(rb"https://[a-z0-9-]+\.supabase\.co", dex)
           ))
 
           jwt_candidates = sorted(set(
               match.decode("ascii")
-              for match in re.findall(rb"eyJ[A-Za-z0-9_-]{20,}\\.[A-Za-z0-9_-]{20,}\\.[A-Za-z0-9_-]{10,}", dex)
+              for match in re.findall(rb"eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}", dex)
           ))
 
           publishable_candidates = sorted(set(
@@ -72,7 +72,7 @@ jobs:
           }
           with open("official-public-config.json", "w", encoding="utf-8") as output:
               json.dump(result, output, indent=2)
-              output.write("\\n")
+              output.write("\n")
 
           print("Extracted official public configuration without logging the key.")
 
