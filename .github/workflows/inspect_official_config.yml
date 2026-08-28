@@ -1,0 +1,85 @@
+name: Inspect official public client configuration
+
+on:
+  push:
+    branches:
+      - inspect-official-config
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download official Nuvio release APK
+        run: |
+          curl --fail --location --retry 3 \
+            --output official-nuvio.apk \
+            https://github.com/NuvioMedia/NuvioTV/releases/download/0.8.10-beta/app-full-arm64-v8a-release.apk
+
+      - name: Extract public client configuration
+        shell: python
+        run: |
+          import base64
+          import json
+          import re
+          import zipfile
+
+          with zipfile.ZipFile("official-nuvio.apk") as apk:
+              dex = b"".join(
+                  apk.read(name)
+                  for name in apk.namelist()
+                  if re.fullmatch(r"classes(?:\\d+)?\\.dex", name)
+              )
+
+          urls = sorted(set(
+              match.decode("ascii")
+              for match in re.findall(rb"https://[a-z0-9-]+\\.supabase\\.co", dex)
+          ))
+
+          jwt_candidates = sorted(set(
+              match.decode("ascii")
+              for match in re.findall(rb"eyJ[A-Za-z0-9_-]{20,}\\.[A-Za-z0-9_-]{20,}\\.[A-Za-z0-9_-]{10,}", dex)
+          ))
+
+          publishable_candidates = sorted(set(
+              match.decode("ascii")
+              for match in re.findall(rb"sb_publishable_[A-Za-z0-9_-]{20,}", dex)
+          ))
+
+          anon_jwts = []
+          for token in jwt_candidates:
+              try:
+                  payload_part = token.split(".")[1]
+                  payload_part += "=" * (-len(payload_part) % 4)
+                  payload = json.loads(base64.urlsafe_b64decode(payload_part))
+                  if payload.get("role") == "anon":
+                      anon_jwts.append(token)
+              except Exception:
+                  pass
+
+          if not urls:
+              raise SystemExit("No Supabase URL found in official APK")
+          if not anon_jwts and not publishable_candidates:
+              raise SystemExit("No public Supabase client key found in official APK")
+
+          result = {
+              "supabase_url": urls[0],
+              "supabase_anon_key": anon_jwts[0] if anon_jwts else publishable_candidates[0],
+              "source_release": "https://github.com/NuvioMedia/NuvioTV/releases/tag/0.8.10-beta",
+          }
+          with open("official-public-config.json", "w", encoding="utf-8") as output:
+              json.dump(result, output, indent=2)
+              output.write("\\n")
+
+          print("Extracted official public configuration without logging the key.")
+
+      - name: Upload extracted configuration
+        uses: actions/upload-artifact@v4
+        with:
+          name: official-public-config
+          path: official-public-config.json
+          retention-days: 1
+          if-no-files-found: error
