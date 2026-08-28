@@ -36,7 +36,12 @@ jobs:
           if [ -n "$LOCAL_PROPERTIES_BASE64" ]; then
             printf '%s' "$LOCAL_PROPERTIES_BASE64" | base64 --decode > local.properties
           else
-            touch local.properties
+            {
+              echo "NUVIO_SUPABASE_URL=https://api.nuvio.tv"
+              echo "NUVIO_SUPABASE_FALLBACK_URL=https://api-two.nuvioapp.space"
+              echo "NUVIO_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzgxNTIxMzQ2LCJleHAiOjE5MzkyMDEzNDZ9.tmQaj682pwzehpqlgCDMnySOqiUvpgRbrE43T4VJpDI"
+              echo "AVATAR_PUBLIC_BASE_URL=https://api.nuvio.tv/storage/v1/object/public/avatars"
+            } > local.properties
           fi
 
           if [ -n "$LOCAL_DEV_PROPERTIES_BASE64" ]; then
