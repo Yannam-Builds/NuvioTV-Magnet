@@ -8,6 +8,9 @@ object DeepLinkParser {
     fun parse(url: String): AppDeepLink? {
         val parsedUrl = runCatching { URI(url.trim()) }.getOrNull() ?: return null
         val scheme = parsedUrl.scheme?.lowercase().orEmpty()
+        if (scheme == "magnet") {
+            return if (url.length <= MAX_MAGNET_LENGTH) parseMagnet(parsedUrl) else null
+        }
         if (scheme == "stremio") {
             val host = parsedUrl.host?.lowercase().orEmpty()
             return if (looksLikeAddonHost(host)) {
@@ -42,6 +45,38 @@ object DeepLinkParser {
                 }
             }
         }
+    }
+
+    private fun parseMagnet(parsedUrl: URI): AppDeepLink.Magnet? {
+        val parameters = queryPairs(parsedUrl)
+        val exactTopic = parameters
+            .firstOrNull { (key, value) ->
+                key.equals("xt", ignoreCase = true) &&
+                    value.startsWith(BTIH_PREFIX, ignoreCase = true)
+            }
+            ?.second
+            ?: return null
+        val rawHash = exactTopic.substring(BTIH_PREFIX.length).trim()
+        val infoHash = normalizeInfoHash(rawHash) ?: return null
+        val displayName = parameters
+            .firstOrNull { (key, _) -> key.equals("dn", ignoreCase = true) }
+            ?.second
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?.take(MAX_DISPLAY_NAME_LENGTH)
+        val trackers = parameters.asSequence()
+            .filter { (key, _) -> key.equals("tr", ignoreCase = true) }
+            .map { (_, value) -> value.trim() }
+            .filter(::isAllowedTracker)
+            .distinct()
+            .take(MAX_TRACKERS)
+            .toList()
+
+        return AppDeepLink.Magnet(
+            infoHash = infoHash,
+            displayName = displayName,
+            trackers = trackers
+        )
     }
 
     private fun parseMetaFromParameters(parsedUrl: URI): AppDeepLink.Meta? {
@@ -85,6 +120,10 @@ object DeepLinkParser {
     }
 
     private fun queryParameters(parsedUrl: URI): Map<String, String> {
+        return queryPairs(parsedUrl).toMap()
+    }
+
+    private fun queryPairs(parsedUrl: URI): List<Pair<String, String>> {
         return parsedUrl.rawQuery
             ?.split("&")
             .orEmpty()
@@ -95,7 +134,22 @@ object DeepLinkParser {
                 val value = decode(pair.substring(index + 1)).trim()
                 if (key.isBlank() || value.isBlank()) null else key to value
             }
-            .toMap()
+    }
+
+    private fun normalizeInfoHash(value: String): String? {
+        val isHex = value.length == 40 &&
+            value.all { it.isDigit() || it.lowercaseChar() in 'a'..'f' }
+        if (isHex) return value.lowercase()
+
+        val isBase32 = value.length == 32 &&
+            value.uppercase().all { it in 'A'..'Z' || it in '2'..'7' }
+        return value.uppercase().takeIf { isBase32 }
+    }
+
+    private fun isAllowedTracker(value: String): Boolean {
+        if (value.isBlank() || value.length > MAX_TRACKER_LENGTH) return false
+        val scheme = runCatching { URI(value).scheme?.lowercase() }.getOrNull()
+        return scheme in ALLOWED_TRACKER_SCHEMES
     }
 
     private fun firstParameter(parameters: Map<String, String>, vararg keys: String): String? {
@@ -138,4 +192,11 @@ object DeepLinkParser {
     private fun decode(value: String): String {
         return runCatching { URLDecoder.decode(value, "UTF-8") }.getOrDefault(value)
     }
+
+    private const val BTIH_PREFIX = "urn:btih:"
+    private const val MAX_MAGNET_LENGTH = 16_384
+    private const val MAX_DISPLAY_NAME_LENGTH = 200
+    private const val MAX_TRACKER_LENGTH = 2_048
+    private const val MAX_TRACKERS = 32
+    private val ALLOWED_TRACKER_SCHEMES = setOf("http", "https", "udp", "ws", "wss")
 }

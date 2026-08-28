@@ -811,6 +811,25 @@ class MainActivity : ComponentActivity() {
                                     launchSingleTop = true
                                 }
                             }
+                            is AppDeepLink.Magnet -> {
+                                pendingDeepLinkUrl.value = null
+                                navController.navigate(
+                                    Screen.Player.createRoute(
+                                        streamUrl = "torrent://${deepLink.infoHash}",
+                                        title = deepLink.displayName
+                                            ?: context.getString(R.string.stream_unknown),
+                                        streamName = context.getString(R.string.stream_type_torrent),
+                                        returnToHomeOnBack = true,
+                                        addonName = context.getString(R.string.app_name),
+                                        infoHash = deepLink.infoHash,
+                                        sources = deepLink.trackers
+                                            .map { tracker -> "tracker:$tracker" }
+                                            .takeIf { trackers -> trackers.isNotEmpty() }
+                                    )
+                                ) {
+                                    launchSingleTop = true
+                                }
+                            }
                             is AppDeepLink.AddonInstall -> {
                                 navController.navigate(Screen.AddonManager.route) {
                                     launchSingleTop = true

@@ -1,0 +1,91 @@
+name: Stable Release APK
+
+on:
+  pull_request:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nuvio-magnet-stable-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stable-release:
+    name: Build stable fullRelease APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Prepare local properties
+        env:
+          LOCAL_PROPERTIES_BASE64: ${{ secrets.LOCAL_PROPERTIES_BASE64 }}
+          LOCAL_DEV_PROPERTIES_BASE64: ${{ secrets.LOCAL_DEV_PROPERTIES_BASE64 }}
+        run: |
+          if [ -n "$LOCAL_PROPERTIES_BASE64" ]; then
+            printf '%s' "$LOCAL_PROPERTIES_BASE64" | base64 --decode > local.properties
+          else
+            {
+              echo "NUVIO_SUPABASE_URL=https://api.nuvio.tv"
+              echo "NUVIO_SUPABASE_FALLBACK_URL=https://api-two.nuvioapp.space"
+              echo "NUVIO_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzgxNTIxMzQ2LCJleHAiOjE5MzkyMDEzNDZ9.tmQaj682pwzehpqlgCDMnySOqiUvpgRbrE43T4VJpDI"
+              echo "AVATAR_PUBLIC_BASE_URL=https://api.nuvio.tv/storage/v1/object/public/avatars"
+            } > local.properties
+          fi
+
+          if [ -n "$LOCAL_DEV_PROPERTIES_BASE64" ]; then
+            printf '%s' "$LOCAL_DEV_PROPERTIES_BASE64" | base64 --decode > local.dev.properties
+          else
+            touch local.dev.properties
+          fi
+
+      - name: Create CI signing key
+        run: |
+          keytool -genkeypair \
+            -keystore "$RUNNER_TEMP/nuvio-magnet-stable.jks" \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -dname "CN=Nuvio Magnet Stable,O=Yannam Builds,C=US" \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000
+
+          {
+            echo "NUVIO_RELEASE_STORE_FILE=$RUNNER_TEMP/nuvio-magnet-stable.jks"
+            echo "NUVIO_RELEASE_KEY_ALIAS=androiddebugkey"
+            echo "NUVIO_RELEASE_KEY_PASSWORD=android"
+            echo "NUVIO_RELEASE_STORE_PASSWORD=android"
+          } >> "$GITHUB_ENV"
+
+      - name: Build stable fullRelease APK
+        run: ./gradlew :app:assembleFullRelease --stacktrace
+
+      - name: Verify and stage universal APK
+        run: |
+          mkdir -p stable-output
+          apk="app/build/outputs/apk/full/release/app-full-universal-release.apk"
+          test -f "$apk"
+          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          "$apksigner" verify --verbose --print-certs "$apk"
+          cp "$apk" stable-output/NuvioTV-Magnet-stable-universal.apk
+          sha256sum stable-output/NuvioTV-Magnet-stable-universal.apk > stable-output/NuvioTV-Magnet-stable-universal.apk.sha256
+
+      - name: Upload stable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NuvioTV-Magnet-stable
+          path: stable-output/
+          if-no-files-found: error
+          retention-days: 30

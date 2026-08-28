@@ -63,4 +63,53 @@ class DeepLinkParserTest {
     fun doesNotTreatNonHostStremioLinkAsAddonInstall() {
         assertNull(DeepLinkParser.parse("stremio://detail/series/tt0944947"))
     }
+
+    @Test
+    fun parsesMagnetDeepLink() {
+        val link = "magnet:?xt=urn:btih:0123456789ABCDEF0123456789ABCDEF01234567" +
+            "&dn=Test%20Movie" +
+            "&tr=udp%3A%2F%2Ftracker.example%3A80%2Fannounce" +
+            "&tr=https%3A%2F%2Ftracker.example%2Fannounce"
+
+        assertEquals(
+            AppDeepLink.Magnet(
+                infoHash = "0123456789abcdef0123456789abcdef01234567",
+                displayName = "Test Movie",
+                trackers = listOf(
+                    "udp://tracker.example:80/announce",
+                    "https://tracker.example/announce"
+                )
+            ),
+            DeepLinkParser.parse(link)
+        )
+    }
+
+    @Test
+    fun parsesBase32MagnetHash() {
+        assertEquals(
+            AppDeepLink.Magnet(
+                infoHash = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567",
+                displayName = null,
+                trackers = emptyList()
+            ),
+            DeepLinkParser.parse("magnet:?xt=urn:btih:abcdefghijklmnopqrstuvwxyz234567")
+        )
+    }
+
+    @Test
+    fun rejectsMagnetWithInvalidHash() {
+        assertNull(DeepLinkParser.parse("magnet:?xt=urn:btih:not-a-valid-hash"))
+    }
+
+    @Test
+    fun filtersUnsafeMagnetTrackers() {
+        val link = "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567" +
+            "&tr=javascript%3Aalert%281%29" +
+            "&tr=https%3A%2F%2Ftracker.example%2Fannounce"
+
+        assertEquals(
+            listOf("https://tracker.example/announce"),
+            (DeepLinkParser.parse(link) as AppDeepLink.Magnet).trackers
+        )
+    }
 }
